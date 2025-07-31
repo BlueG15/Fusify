@@ -1,2 +1,2 @@
 # fusify
-Fusify "scrapes" spotify's internal API
+Fusify "scrapes" Spotify's internal API
