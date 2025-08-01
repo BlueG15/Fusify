@@ -1,2 +1,2 @@
-# fusify
+# Fusify
 Fusify "scrapes" Spotify's internal API

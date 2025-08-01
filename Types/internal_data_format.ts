@@ -26,7 +26,7 @@ export class Track extends UniversalDataType {
     constructor(
         id : string,
         public readonly name : string,
-        public readonly duration : number, //in ms
+        public readonly duration_ms : number,
         public readonly isrc? : string,
     ){
         super(id, DataTypes.Track)

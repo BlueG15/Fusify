@@ -7,6 +7,13 @@ declare global {
          */
         rng(max : number, min : number, round? : boolean) : number
     }
+
+    var Fetcher: typeof import("./network_fetch").Fetcher;
+
+    //Externals
+    var MusixMatch: typeof import("../External/MusixMatch").MusixMatch;
+    var Spotify: typeof import("../External/Spotify").Spotify;
+    
 }
 
 Math.rng = function (max, min, round, a = Math.random() * (max - min) + min){

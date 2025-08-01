@@ -8,4 +8,5 @@ export class __Module<InputType extends Object, OutputType extends Object>{
 
     //temp solution, it aint gud but ive got nothing better for now
     isInputCorrect(k : Object) : k is InputType {return false}
+    
 }

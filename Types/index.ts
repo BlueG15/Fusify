@@ -1,5 +1,3 @@
-import "./global"
-
 import { 
     UniversalDataType,
     Track,
@@ -10,7 +8,9 @@ import {
 
 import { __Module } from "./module"
 
-import { Respond, ServerRes } from "./network"
+import { Respond, ServerRes } from "./network_respond"
+
+import { Fetcher } from "./network_fetch"
 
 export {
     UniversalDataType,
@@ -20,6 +20,6 @@ export {
     ImageObject,
     __Module,
     ServerRes,
-
-    Respond
+    Fetcher,
+    Respond,
 }

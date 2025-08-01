@@ -1,9 +1,14 @@
-import { Respond } from "../Types"
+import { Respond, ServerRes } from "../Types"
 
-const CANNOT_FETCH_RESPONSE = new response(true, "cannot get lyric for song with this isrc", {isrc : ""}, 400)
-const COPRIGHTED_RESPONSE = new response(true, "lyrics is copyrighted, musixmatch refused to provide", {}, 403);
+const CANNOT_FETCH_RESPONSE = Respond.ExternalServicesDown({
+    service : "MusixMatch"
+})
+const COPRIGHTED_RESPONSE = Respond.ExternalServiceDeclined({
+    service : "MusixMatch"
+})
 
-interface MusixmatchLyricResponse {
+//
+type __Internal_MusixmatchLyricResponse = {
 	message: {
 		header: {
 			status_code: number;
@@ -14,7 +19,7 @@ interface MusixmatchLyricResponse {
 	};
 }
 
-interface MusixmatchLyrics {
+type __Internal_MusixmatchLyrics = {
     type : string;
 	action_requested: string;
 	backlink_url: string;
@@ -23,9 +28,9 @@ interface MusixmatchLyrics {
 	html_tracking_url: string;
 	instrumental: number;
 	locked: number;
-	lyrics_body: MusixmatchLyric[];
-	subtitle_body: MusixmatchSubtitle[];
-	richsync_body: MusixmatchRichsync[];
+	lyrics_body: __Internal_MusixmatchLyric[];
+	subtitle_body: __Internal_MusixmatchSubtitle[];
+	richsync_body: __Internal_MusixmatchRichsync[];
 	lyrics_copyright: string;
 	lyrics_id: number;
 	lyrics_language: string;
@@ -39,11 +44,11 @@ interface MusixmatchLyrics {
 	verified: number;
 }
 
-interface MusixmatchLyric {
+type __Internal_MusixmatchLyric = {
 	text: string;
 }
 
-interface MusixmatchSubtitle {
+type __Internal_MusixmatchSubtitle = {
 	text: string;
 	time: {
 		total: number;
@@ -53,89 +58,120 @@ interface MusixmatchSubtitle {
 	};
 }
 
-interface MusixmatchRichsync {
+type __Internal_MusixmatchRichsync = {
 	start: number;
 	end: number;
-	body: MusixmatchRichsyncBody[];
+	body: __Internal_MusixmatchRichsyncBody[];
 	text: string;
 }
 
-interface MusixmatchRichsyncBody {
+type __Internal_MusixmatchRichsyncBody = {
 	text: string;
 	offset: number;
 }
 
-enum MusixmatchLyricTypes {
+const enum __Internal_MusixmatchLyricTypes {
 	"LYRICS" = 'track.lyrics.get',
     "SUBTITLES" = 'track.subtitles.get',
 	"RICHSYNC" = 'track.richsync.get'
 }
 
-type MusixmatchLyricType = MusixmatchLyricTypes[keyof MusixmatchLyricTypes];
+type __Internal_MusixmatchLyricType = __Internal_MusixmatchLyricTypes[keyof __Internal_MusixmatchLyricTypes];
 
-class MusixMatch {
+
+//
+type LyricSegment_hasTiming = {
+    start_ms : number
+    duration_ms : number
+    text : string 
+}
+
+type LyricSegment_noTiming = {
+    text : string
+}
+
+export type LyricRespond = {
+    isrc : string
+    type : "LYRICS" | "SUBTITLES" | "RICHSYNC"
+    Segments : LyricSegment_hasTiming[] | LyricSegment_noTiming[]
+}
+
+export class MusixMatch {
     //LYRIC_TYPES: MusixmatchLyricTypes;
-    protected tokens: string[] = [];
-    private get api_base() {
+    static tokens: string[] = process.env.MusixMatchKeysCSV!.split(",");
+    static get api_base() {
         return "https://curators.musixmatch.com/ws/1.1/";
     };
-    private get token(){
+    static get token(){
         return this.tokens[Math.floor(Math.random() * this.tokens.length)];
     };
     addToken(...token: string[]): void {
-        this.tokens.push(...token);
+        MusixMatch.tokens.push(...token);
     };
-    constructor(){
-        let concatstr = process.env.key_concat_string;
-        let num = Number(process.env.key_length);
+    // constructor(){
+    //     //TODO : fix this
+    //     let concatstr : string = process.env.key_concat_string!;
+    //     let num = Number(process.env.key_length);
 
-        let i = 0;
-        while(i < concatstr.length){
-            let substr = concatstr.slice(i, i + num);
-            this.addToken(substr);
-            i += num;
-        }
-    };
-    private getLyrics(isrc: string): Promise<MusixmatchLyrics>{
+    //     let i = 0;
+    //     while(i < concatstr.length){
+    //         let substr = concatstr.slice(i, i + num);
+    //         this.addToken(substr);
+    //         i += num;
+    //     }
+    // };
+    static getLyrics(isrc: string): Promise<LyricRespond>{
         //just lyrics, no time signature, no nothing
         return new Promise(async (res, rej) => {
-            this.requestLyrics(isrc, MusixmatchLyricTypes.LYRICS).then((req) => {
-              const lyric = req.message.body.lyrics;
-              lyric.lyrics_body = this.processLyrics(lyric.lyrics_body.toString());
-              lyric.type = "LYRICS";
-              res(lyric);
+            this.requestLyrics(isrc, __Internal_MusixmatchLyricTypes.LYRICS).then((req) => {
+                const lyric = req.message.body.lyrics as __Internal_MusixmatchLyrics;
+                if(lyric.restricted) throw COPRIGHTED_RESPONSE
+                const Segments = this.processLyrics(lyric.lyrics_body.toString());
+                res({
+                    isrc,
+                    type : "LYRICS",
+                    Segments
+                });
             }).catch((e) => {
-              rej(e);
+                rej(e);
             });
           });
     };
-    private getSubtitleLyrics(isrc: string): Promise<MusixmatchLyrics>{
+    static getSubtitleLyrics(isrc: string): Promise<LyricRespond>{
         //time signatured lyrics to the sentences level
         return new Promise((res, rej) => {
-            this.requestLyrics(isrc, MusixmatchLyricTypes.SUBTITLES).then((req) => {
-              const lyric = req.message.body.subtitle_list[0].subtitle;
-              lyric.subtitle_body = this.processSubtitles(lyric.subtitle_body.toString());
-              lyric.type = "SUBTITLES";
-              res(lyric);
+            this.requestLyrics(isrc, __Internal_MusixmatchLyricTypes.SUBTITLES).then((req) => {
+                const lyric = req.message.body.subtitle_list[0].subtitle;
+                if(lyric.restricted) throw COPRIGHTED_RESPONSE
+                const Segments = this.processSubtitles(lyric.subtitle_body.toString());
+                res({
+                    isrc,
+                    type : "SUBTITLES",
+                    Segments,
+                });
             }).catch((e) => {
-              rej(e);
+                rej(e);
             });
           });
     };
-    private getRichsyncLyrics(isrc: string): Promise<MusixmatchLyrics>{
+    static getRichsyncLyrics(isrc: string): Promise<LyricRespond>{
         //time signatured lyrics to the word level
         return new Promise((res, rej) => {
-            this.requestLyrics(isrc, MusixmatchLyricTypes.RICHSYNC).then((req) => {
+            this.requestLyrics(isrc, __Internal_MusixmatchLyricTypes.RICHSYNC).then((req) => {
               const lyric = req.message.body.richsync;
-              lyric.richsync_body = this.processRichsync(lyric.richsync_body.toString());
-              lyric.type = "RICHSYNC";
-              res(lyric);
+              if(lyric.restricted) throw COPRIGHTED_RESPONSE
+              const Segments = this.processRichsync(lyric.richsync_body.toString());
+                res({
+                    isrc,
+                    type : "RICHSYNC",
+                    Segments
+                });
             }).catch((e) => {
               rej(e);
             });
           });
     };
-    protected buildSearchParams(isrc: string): URLSearchParams{
+    static buildSearchParams(isrc: string): URLSearchParams{
         const params = {
             format: "json",
             track_isrc: isrc,
@@ -148,7 +184,7 @@ class MusixMatch {
           return new URLSearchParams(params);
     };
 
-    private async requestLyricsAuto(isrc : string) : Promise<MusixmatchLyrics>{
+    static async getLyricsAuto(isrc : string) : Promise<LyricRespond>{
         //auto in this priority:
         //richsync -> subtitle -> lyric
 
@@ -159,92 +195,113 @@ class MusixMatch {
                 if(result[1] && result[1].status == 'fulfilled') return res(result[1].value);
                 if(result[2] && result[2].status == 'fulfilled') return res(result[2].value);            
                 let a = CANNOT_FETCH_RESPONSE;
-                a.data.isrc = isrc;
                 rej(a);
             })
         })
     }
 
-    private requestLyrics(isrc: string, type?: MusixmatchLyricType): Promise<MusixmatchLyricResponse>{
-        //ping musixmatch
-        //rewritten by me to use axios instead
-
-        return new Promise((res, rej) => {
-            const URL = `${this.api_base}/${type}?${this.buildSearchParams(isrc).toString()}`;
-            const config = {
-                headers :  {
-                    'Cookie': "x-mxm-user-id="
-                }
+    static async requestLyrics(isrc: string, type: __Internal_MusixmatchLyricType): Promise<__Internal_MusixmatchLyricResponse>{
+        const URL = `${this.api_base}/${type}?${this.buildSearchParams(isrc).toString()}`;
+        const config = {
+            headers :  {
+                'Cookie': "x-mxm-user-id="
             }
-            axios.get(URL, config).then(axiosRes => {
-                if(axiosRes.status != 200){
-                    let a = CANNOT_FETCH_RESPONSE;
-                    a.data.isrc = isrc;
-                    rej(a);  
-                }
-                const data = axiosRes.data as MusixmatchLyricResponse
-                if(data.message.header.status_code != 200){
-                    let a = CANNOT_FETCH_RESPONSE;
-                    a.data.isrc = isrc;
-                    rej(a);
-                }
-                res(data)
-            })
-            .catch(err => {
-                let a = CANNOT_FETCH_RESPONSE;
-                a.data.isrc = isrc;
-                a.fixAndAppendData(util.format(err));
-                rej(a);
-            })
-        })
+        }
+        const res = await Fetcher.get(
+            URL, config, 
+            (k) => (k as __Internal_MusixmatchLyricResponse), 
+            () => undefined
+        )
+
+        if(res) return res;
+        throw CANNOT_FETCH_RESPONSE;
     };
-    protected processLyrics(lyrics_body: string): MusixmatchLyric[] {
+
+    static processLyrics(lyrics_body: string): LyricSegment_noTiming[] {
         const body = lyrics_body.split("\n");
         return body.map((item) => ({
-        text: item
+            text: item
         }));
     };
-    protected processSubtitles(subtitle_body: string): MusixmatchSubtitle[]{
+    static processSubtitles(subtitle_body: string): LyricSegment_hasTiming[]{
         try{
-            let a = JSON.parse(subtitle_body);
-            return a;
+            const parse_1 : __Internal_MusixmatchSubtitle[] = JSON.parse(subtitle_body);
+            let total_durr = 0
+            return parse_1.map((i, index) => {
+                const res = {
+                    text : i.text,
+                    start_ms : total_durr,
+                    duration_ms : i.time.total * 1000,
+                }
+
+                total_durr += res.duration_ms
+
+                return res;
+            })
         }catch(err){         
             return []
         }
     };
-    protected processRichsync(richsync_body: string): MusixmatchRichsync[]{
-        const body = JSON.parse(richsync_body);
-        return body.map((item) => ({
-            start: item.ts * 1000, //ms
-            end: item.te * 1000, //ms
+    static processRichsync(richsync_body: string): LyricSegment_hasTiming[] {
+        const body : {
+            ts : number, 
+            te : number, 
+            l : {c : string, o : number}[], 
+            x : string
+        }[] = JSON.parse(richsync_body);
+
+        const parse_1 : __Internal_MusixmatchRichsync[] = body.map((item) => ({
+            start: item.ts, //ms
+            end: item.te, //ms
             body: item.l.map((item2) => ({
                 text: item2.c,
-                offset: item2.o
+                offset: item2.o * 1000
             })),
             text: item.x
         }));
+
+        const res : LyricSegment_hasTiming[] = []
+        parse_1.forEach((i, index) => {
+            if(i.body.length){
+                i.body.forEach(k => {
+                    const next = i.body[index + 1] as __Internal_MusixmatchRichsyncBody | undefined
+                    const nextStart_time = next ? next.offset + i.start : i.end
+
+                    res.push({
+                        text : k.text,
+                        start_ms : i.start + k.offset, //I assume start is in milisecond? no clue
+                        duration_ms : nextStart_time - i.start - k.offset
+                    })
+                })
+            } else {
+                res.push({
+                    text : i.text,
+                    start_ms : i.start,
+                    duration_ms : i.end - i.start
+                })
+            }
+        })
+
+        return res
     };
 
-    async main(isrc: string, type? : string){
+    static get(isrc: string, type? : keyof typeof __Internal_MusixmatchLyricTypes | "AUTO"){
+        return new Promise<ServerRes>((res, rej) => {
 
-        let res : MusixmatchLyrics;
-
-        if(type == "RICHSYNC"){
-            res = await this.getRichsyncLyrics(isrc);
-        } else if(type == "SUBTITLES"){
-            res = await this.getSubtitleLyrics(isrc);
-        } else if(type == "LYRICS") {
-            res = await this.getLyrics(isrc);
-        } else res = await this.requestLyricsAuto(isrc);
-
-        if(res.restricted) {
-            let x = COPRIGHTED_RESPONSE;
-            x.data = res;
-            return x;
-        }
-
-        return res;
+            let res_p : Promise<LyricRespond>;
+            
+            switch(type){
+                case "LYRICS" : {res_p = this.getLyrics(isrc); break;}
+                case "RICHSYNC" : {res_p = this.getRichsyncLyrics(isrc); break;}
+                case "SUBTITLES" : {res_p = this.getSubtitleLyrics(isrc); break;}
+                default : {res_p = this.getLyricsAuto(isrc); break}
+            }
+            
+            res_p
+            .then((d) => res(Respond.Lyric(d)))
+            .catch((d : typeof COPRIGHTED_RESPONSE | typeof CANNOT_FETCH_RESPONSE) => res(d))
+        })
     }
 }
 
-export { MusixMatch }
+(globalThis as any).Musixmatch = MusixMatch
